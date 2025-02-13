@@ -17,19 +17,21 @@ jobs:
           repository: php/php-src
           ref: PHP-8.3
           submodules: recursive
+          fetch-depth: 1
 
-      - name: Install Dependencies
-        run: |
-          choco install -y nasm strawberryperl winflexbison ninja cmake
-          echo "Installed build dependencies."
+      - name: Debug Directory Structure
+        run: dir
+        shell: cmd
 
-      - name: Setup vcpkg
+      - name: Verify php-src Directory Exists
         run: |
-          git clone https://github.com/microsoft/vcpkg.git C:\vcpkg
-          cd C:\vcpkg
-          .\bootstrap-vcpkg.bat
-          .\vcpkg install libxml2 openssl curl sqlite3
-          echo "VCPKG_PATH=C:\vcpkg" >> $GITHUB_ENV
+          if exist php-src (
+            echo "php-src exists"
+          ) else (
+            echo "Error: php-src directory missing!"
+            exit 1
+          )
+        shell: cmd
 
       - name: Configure PHP Build
         shell: cmd
@@ -41,15 +43,3 @@ jobs:
           --enable-bcmath --enable-intl --enable-pdo --with-mysqli ^
           --enable-apcu=static --enable-redis=static --enable-ffi=static
           echo "PHP configuration done."
-
-      - name: Compile PHP
-        run: |
-          cd php-src
-          nmake
-          echo "PHP build completed."
-
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: php-static-build
-          path: php-src\x64\Release\
