@@ -31,16 +31,16 @@ jobs:
           .\vcpkg install libxml2 openssl curl sqlite3
           echo "VCPKG_PATH=C:\vcpkg" >> $GITHUB_ENV
 
-            - name: Configure PHP Build
-              shell: cmd
-              run: |
-                cd php-src
-                buildconf
-                configure --enable-static --disable-shared --disable-cli --enable-embed=static ^
-                --with-openssl --with-libxml --with-curl --enable-mbstring ^
-                --enable-bcmath --enable-intl --enable-pdo --with-mysqli ^
-                --enable-apcu=static --enable-redis=static --enable-ffi=static
-                echo "PHP configuration done."
+      - name: Configure PHP Build
+        shell: cmd
+        run: |
+          cd php-src
+          buildconf
+          configure --enable-static --disable-shared --disable-cli --enable-embed=static ^
+          --with-openssl --with-libxml --with-curl --enable-mbstring ^
+          --enable-bcmath --enable-intl --enable-pdo --with-mysqli ^
+          --enable-apcu=static --enable-redis=static --enable-ffi=static
+          echo "PHP configuration done."
 
       - name: Compile PHP
         run: |
