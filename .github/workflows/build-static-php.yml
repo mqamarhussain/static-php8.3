@@ -1,60 +1,124 @@
-name: Build Static PHP 8.3
+name: Build Self-Hosted PHP Binary (Unix)
 
 on:
   workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  build-release-artifacts:
+    name: "Build ${{ matrix.php-version }}-${{ matrix.combination }} on ${{ matrix.runner }}"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        php-version: ["8.3"]
+        runner: ["ubuntu-latest"]
+        combination: ["common"]
+    
     steps:
-      - name: Checkout Repository
+      - name: "Process environment variables"
+        id: process-env
+        shell: bash
+        run: |
+          cat <<EOF >> "$GITHUB_ENV"
+          EXTENSIONS=apcu,bcmath,bz2,calendar,ctype,curl,dba,dom,event,exif,fileinfo,filter,ftp,gd,gmp,iconv,imagick,imap,intl,mbregex,mbstring,mysqli,mysqlnd,opcache,openssl,pcntl,pdo,pdo_mysql,pgsql,phar,posix,protobuf,readline,redis,session,shmop,simplexml,soap,sockets,sodium,sqlite3,swoole,swoole-hook-mysql,swoole-hook-pgsql,swoole-hook-sqlite,sysvmsg,sysvsem,sysvshm,tokenizer,xml,xmlreader,xmlwriter,xsl,zip,zlib
+          OS=linux
+          ARCH=x86_64
+          CMD=bin/spc
+          EOF
+
+      - name: "Checkout remote repository"
+        if: github.repository != 'crazywhalecc/static-php-cli'
         uses: actions/checkout@v4
+        with:
+          repository: crazywhalecc/static-php-cli
+          ref: main
 
-      - name: Install Dependencies
+      - name: "Setup PHP"
+        if: matrix.runner != 'ubuntu-20.04'
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: 8.3
+          tools: pecl, composer
+          extensions: curl, openssl, mbstring
+          ini-values: memory_limit=-1
+
+      - name: "Cache composer packages"
+        id: composer-cache
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: ${{ runner.os }}-php-${{ hashFiles('**/composer.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-php
+
+      - id: cache-download
+        uses: actions/cache@v4
+        with:
+          path: downloads
+          key: pack-lib-dependencies-${{ matrix.combination }}-${{ matrix.php-version }}-${{ matrix.runner }}
+
+      - name: "Install Dependencies"
+        if: matrix.runner != 'ubuntu-20.04'
+        run: composer update --no-interaction --no-progress --prefer-dist --no-dev
+
+      - name: "Check build environment"
+        run: ${{ env.CMD }} doctor --auto-fix
+
+      - name: "Download sources"
+        env:
+          GITHUB_TOKEN: ${{ secrets.S_GITHUB_TOKEN }}
+        run: ${{ env.CMD }} download --with-php=${{ matrix.php-version }} --for-extensions=${{ env.EXTENSIONS }} --retry=5 --prefer-pre-built
+
+      - name: "Build PHP binaries"
         run: |
-          sudo apt update && sudo apt install -y \
-            autoconf bison build-essential curl libxml2-dev \
-            libsqlite3-dev libonig-dev libzip-dev libjpeg-dev \
-            libpng-dev libfreetype6-dev libssl-dev libcurl4-openssl-dev \
-            libicu-dev libpq-dev libreadline-dev libxslt1-dev \
-            libmagickwand-dev imagemagick libbz2-dev libdb-dev libsodium-dev \
-            libgd-dev
+          if [ "${{ env.OS }}" = "linux" ]; then
+            ${{ env.CMD }} install-pkg upx
+            if [ "${{ env.ARCH }}" = "x86_64" ]; then
+              UPX=--with-upx-pack
+            fi
+          fi
+          
+          ${{ env.CMD }} build --build-cli --build-micro --build-fpm ${{ env.EXTENSIONS }} --debug $UPX
 
-      - name: Download PHP 8.3 Source
-        run: |
-          wget https://www.php.net/distributions/php-8.3.0.tar.gz
-          tar -xvzf php-8.3.0.tar.gz
-          cd php-8.3.0
+          mkdir -p tmp_dist/
+          cp buildroot/bin/php tmp_dist/
+          cp buildroot/bin/micro.sfx tmp_dist/
+          cp buildroot/bin/php-fpm tmp_dist/
 
-      - name: Configure PHP for Static Build
-        run: |
-          cd php-8.3.0
-          ./configure --prefix=$GITHUB_WORKSPACE/php-8.3-static \
-            --enable-static=yes --enable-shared=no \
-            --enable-bcmath --enable-calendar --enable-mbstring \
-            --enable-exif --enable-intl --enable-opcache \
-            --enable-pcntl --enable-phar --enable-posix \
-            --enable-sockets --enable-tokenizer --enable-zip \
-            --with-curl --with-dom --with-fileinfo --with-gd \
-            --with-iconv --with-mysqli --with-pdo-mysql \
-            --with-pdo-pgsql --with-pdo-sqlite --with-pgsql \
-            --with-readline --with-sodium --with-xmlrpc \
-            --with-xml --with-xsl --with-zlib \
-            --with-openssl --with-imagick
+          if [ "${{ env.OS }}-${{ env.ARCH }}" = "linux-aarch64" ]; then
+            mkdir -p upx-x86_64
+            cd upx-x86_64
+            curl -#fSL -o upx.txz https://github.com/upx/upx/releases/download/v4.2.4/upx-4.2.4-amd64_linux.tar.xz
+            tar -xf upx.txz --strip-components 1
+            ./upx --best ../tmp_dist/php
+            ./upx --best ../tmp_dist/micro.sfx
+            SFX_SIZE=$(readelf -l ../tmp_dist/micro.sfx | awk '/LOAD|GNU_STACK/ {getline; print $1, $2, $3, $4, $6, $7}' | sed -n '2p' | awk '{print $1}')
+            head -c $(printf "%d" $SFX_SIZE) ../tmp_dist/micro.sfx > ../tmp_dist/micro.sfx.new
+            mv ../tmp_dist/micro.sfx.new ../tmp_dist/micro.sfx
+            ./upx --best ../tmp_dist/php-fpm
+            cd ..
+          fi
 
-      - name: Build PHP 8.3
-        run: |
-          cd php-8.3.0
-          make -j$(nproc)
-          make install
+          PHPVER=$(grep "PHP_VERSION " source/php-src/main/php_version.h | awk -F\" '{print $2}')
+          
+          mkdir -p dist
+          tar -czf dist/php-$PHPVER-cli-${{ env.OS }}-${{ env.ARCH }}.tar.gz -C tmp_dist/ php
+          tar -czf dist/php-$PHPVER-micro-${{ env.OS }}-${{ env.ARCH }}.tar.gz -C tmp_dist/ micro.sfx
+          tar -czf dist/php-$PHPVER-fpm-${{ env.OS }}-${{ env.ARCH }}.tar.gz -C tmp_dist/ php-fpm
 
-      - name: Verify PHP Build
-        run: |
-          ./php-8.3-static/bin/php -v
-          ./php-8.3-static/bin/php -m
+          if [ "${{ matrix.php-version }}" == "8.4" ] && [ "${{ matrix.runner }}" == "ubuntu-latest" ]; then
+            cp -r buildroot/license dist/
+            cp buildroot/build-extensions.json dist/
+            cp buildroot/build-libraries.json dist/
+            echo -e "# Note\n\nCurrent distribution uses extensions:\n\n${{ env.EXTENSIONS }}\n\nUsing compile command:\n\n  bin/spc build --build-cli --build-micro --build-fpm ${{ env.EXTENSIONS }} --debug --with-upx-pack" > dist/README.txt
+          fi
 
-      - name: Upload PHP Binary as Artifact
+      - name: "Upload Artifact"
         uses: actions/upload-artifact@v4
         with:
-          name: static-php-8.3
-          path: php-8.3-static/bin/php
+          name: php-${{ matrix.php-version }}-${{ matrix.combination }}-${{ env.OS }}-${{ env.ARCH }}
+          path: |
+            tmp_dist/php
+            tmp_dist/php-fpm
+            tmp_dist/micro.sfx
+          if-no-files-found: error
