@@ -1,7 +1,7 @@
 name: Build Static PHP 8.3
 
 on:
-  workflow_dispatch:  # Allows manual triggering
+  workflow_dispatch:
 
 jobs:
   build:
@@ -17,7 +17,7 @@ jobs:
             libsqlite3-dev libonig-dev libzip-dev libjpeg-dev \
             libpng-dev libfreetype6-dev libssl-dev libcurl4-openssl-dev \
             libicu-dev libpq-dev libreadline-dev libxslt1-dev \
-            libmagickwand-dev libbz2-dev libdb-dev
+            libmagickwand-dev libbz2-dev libdb-dev libsodium-dev
 
       - name: Download PHP 8.3 Source
         run: |
