@@ -17,14 +17,14 @@ jobs:
             libsqlite3-dev libonig-dev libzip-dev libjpeg-dev \
             libpng-dev libfreetype6-dev libssl-dev libcurl4-openssl-dev \
             libicu-dev libpq-dev libreadline-dev libxslt1-dev \
-            libmagickwand-dev libbz2-dev libdb-dev libsodium-dev
+            libmagickwand-dev imagemagick libbz2-dev libdb-dev libsodium-dev \
+            libgd-dev
 
       - name: Download PHP 8.3 Source
         run: |
           wget https://www.php.net/distributions/php-8.3.0.tar.gz
           tar -xvzf php-8.3.0.tar.gz
           cd php-8.3.0
-          pwd  # Verify directory
 
       - name: Configure PHP for Static Build
         run: |
@@ -40,7 +40,7 @@ jobs:
             --with-pdo-pgsql --with-pdo-sqlite --with-pgsql \
             --with-readline --with-sodium --with-xmlrpc \
             --with-xml --with-xsl --with-zlib \
-            --with-openssl --with-imagick --enable-redis
+            --with-openssl --with-imagick
 
       - name: Build PHP 8.3
         run: |
